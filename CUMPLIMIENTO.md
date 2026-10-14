@@ -17,8 +17,9 @@
 | CORS y variables de entorno | Orígenes exactos y .env.example | Probado CORS y rechazo CSRF |
 | Swagger/OpenAPI | /api/docs y /api/openapi.json | Documento JSON probado |
 | Frontend y backend públicos | Compose + HTTPS preparados | Pendiente de alojamiento y validación |
-| GitHub | Ferotuc/campus-social | Repositorio privado; acceso del docente pendiente |
+| GitHub | Ferotuc/Rede-social | Repositorio público |
 | PDF con datos, arquitectura y tecnologías | Informe borrador externo al repositorio | Preparado; faltan URLs y capturas de producción |
 | SSR/prerender | El enunciado lo recomienda | No incluido; usa renderizado cliente |
 
 Fecha de entrega del archivo exportado: 31/10/2026, 23:59 (Guatemala). Docker está instalado en el equipo, pero su motor no estaba activo durante la preparación; los contenedores aún no fueron ejecutados ni validados. No declarar cumplimiento total hasta resolver los estados pendientes.
+

@@ -6,7 +6,7 @@ Aplicación para compartir publicaciones de texto, dar me gusta, comentar y segu
 
 Código implementado. El despliegue público queda pendiente hasta disponer de alojamiento. **No entregar el PDF como versión final mientras falten URLs públicas funcionales y capturas de producción.**
 
-Repositorio: https://github.com/Ferotuc/campus-social (privado; para evaluación se debe conceder acceso al docente o cambiar su visibilidad).
+Repositorio: https://github.com/Ferotuc/Rede-social (público).
 
 ## Tecnologías
 
@@ -108,3 +108,4 @@ Para Render/Railway se requiere disco persistente para la base de datos y un ún
 - [ ] README con URLs públicas definitivas.
 - [ ] PDF con nombre, carné, arquitectura, tecnologías, capturas y enlaces funcionales.
 - [ ] PDF subido a Canvas antes del 31 de octubre de 2026, 23:59 (Guatemala).
+
