@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {api,BASE,User,Post,Comment} from './api';
 import './style.css';
 import Chat,{MessageComposer,Attachment} from './Chat';
+import './theme.css';
 function initials(name:string){return name.split(' ').slice(0,2).map(v=>v[0]).join('').toUpperCase();}
 function Avatar({user,small=false}:{user:{name:string};small?:boolean}){return <span className={`avatar ${small?'small':''}`} aria-hidden="true">{initials(user.name)}</span>;}
 function Auth({onSuccess,onClose}:{onSuccess:(u:User)=>void;onClose:()=>void}){
