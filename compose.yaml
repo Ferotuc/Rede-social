@@ -1,0 +1,38 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      FRONTEND_ORIGIN: ${PUBLIC_ORIGIN:-https://localhost}
+      DATABASE_PATH: /data/campus.db
+      TRUST_PROXY_HOPS: 2
+    volumes:
+      - campus-data:/data
+    expose:
+      - "3001"
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_HOST: ${SITE_HOST:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+volumes:
+  campus-data:
+  caddy-data:
+  caddy-config:
