@@ -6,6 +6,8 @@ Aplicación para compartir publicaciones de texto, dar me gusta, comentar y segu
 
 Código implementado. El despliegue público queda pendiente hasta disponer de alojamiento. **No entregar el PDF como versión final mientras falten URLs públicas funcionales y capturas de producción.**
 
+Repositorio: https://github.com/Ferotuc/campus-social (privado; para evaluación se debe conceder acceso al docente o cambiar su visibilidad).
+
 ## Tecnologías
 
 - Frontend: React, TypeScript y Vite; HTML semántico y CSS responsive.
