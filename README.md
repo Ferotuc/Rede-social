@@ -2,6 +2,39 @@
 
 Aplicación para compartir publicaciones de texto, dar me gusta, comentar y seguir a otros estudiantes. Incluye feed general, feed de personas seguidas, perfiles editables y actualizaciones de interfaz en tiempo real mediante Server-Sent Events (SSE).
 
+También incluye **mensajes privados** con texto, emojis, imágenes, archivos de audio y videos; permite grabar notas de voz desde el navegador.
+
+## Usar mensajes y archivos
+
+1. Iniciar sesión y abrir **Mensajes** en la barra lateral.
+2. Elegir a otra persona de la comunidad.
+3. Escribir texto o usar el selector de emojis.
+4. Pulsar **Adjuntar** para elegir una imagen, audio o video. Se admite un archivo por mensaje, de hasta **20 MB**.
+5. Para una nota de voz, pulsar **Voz**, permitir el micrófono, grabar y pulsar **Terminar**. Revisar el audio y pulsar **Enviar**; **Cancelar** descarta la grabación. Duración máxima: dos minutos.
+
+Formatos admitidos: JPG, PNG, GIF, WebP, MP3, WAV, OGG, M4A/MP4 y WebM. La reproducción depende de los codecs que soporte el navegador; no se realiza conversión automática. Solo los dos participantes pueden consultar mensajes y archivos. Los adjuntos se conservan como BLOB en SQLite; cuota de archivos enviados de 200 MB por cuenta. No se trata de cifrado de extremo a extremo.
+
+La grabación requiere permiso del usuario, un navegador compatible y un contexto seguro (HTTPS en producción; localhost/127.0.0.1 en desarrollo). El micrófono se detiene al finalizar, cancelar o cerrar la conversación. Las notificaciones SSE del chat están separadas de las del feed y se filtran por participante; el feed público no recibe contenido de mensajes privados.
+
+## Actualizar una copia ya clonada
+
+Detener backend y frontend con Ctrl+C, abrir una terminal en la raíz y ejecutar:
+
+```powershell
+git pull origin main
+npm run build
+npm test
+npm run dev:api
+```
+
+En otra terminal, usar el puerto configurado en `FRONTEND_ORIGIN`, por ejemplo:
+
+```powershell
+npm run dev:web -- --port 5174 --strictPort
+```
+
+Los archivos `.env` y la base de datos local no se actualizan con Git. La migración `002_private_messages.sql` añade las tablas de chat sin borrar usuarios o publicaciones. Mantener los valores existentes del backend y frontend: `PORT=3002`, `FRONTEND_ORIGIN=http://127.0.0.1:5174` y `VITE_API_URL=http://127.0.0.1:3002` si esa es la configuración local elegida.
+
 ## Estado de la entrega
 
 Código implementado. El despliegue público queda pendiente hasta disponer de alojamiento. **No entregar el PDF como versión final mientras falten URLs públicas funcionales y capturas de producción.**
@@ -66,6 +99,8 @@ No se usa un secreto JWT: las sesiones son tokens aleatorios de 256 bits, conser
 
 `backend/migrations/001_initial.sql` crea usuarios, sesiones, publicaciones, likes, comentarios y relaciones de seguimiento. La API ejecuta cada migración pendiente en una transacción y registra su nombre en `schema_migrations`. Reiniciar no elimina los datos ni repite migraciones aplicadas.
 
+`002_private_messages.sql` añade mensajes privados y archivos. El respaldo de SQLite incluye los adjuntos, que se almacenan dentro de esa misma base.
+
 No borrar el volumen `campus-data` al actualizar. Para respaldar una instancia pequeña, detener el backend y copiar `/data/campus.db` desde el volumen; guardar los respaldos fuera del servidor. No ejecutar múltiples réplicas del backend con este diseño: SSE es local al proceso y SQLite requiere un disco persistente compartido con cautela.
 
 ## API y permisos
@@ -79,6 +114,7 @@ No borrar el volumen `campus-data` al actualizar. Para respaldar una instancia p
 | Likes | PUT y DELETE `/posts/:id/like` |
 | Comentarios | GET y POST `/posts/:id/comments` |
 | Tiempo real | GET `/events` con `text/event-stream` |
+| Chat privado | GET y POST `/chat/:id/messages`; GET `/chat/media/:id`; GET `/chat/events` |
 
 Prefijo común: `/api`. Feed paginado: `?page=1&mode=all`, `mode=following` o `author=ID`. Las lecturas son públicas; las mutaciones requieren sesión, salvo registro/login. Solo el autor puede borrar su publicación o modificar su perfil. Likes y seguimientos son idempotentes y poseen claves compuestas únicas. No se permite seguirse a uno mismo.
 
@@ -99,6 +135,10 @@ Para Render/Railway se requiere disco persistente para la base de datos y un ún
 ## Pruebas
 
 `npm test` verifica un servidor real con base temporal: registro/login, rechazo de datos inválidos y campos extra, duplicados 409, autorización 401/403, likes idempotentes, comentarios, seguimiento, perfiles, 404, CORS/CSRF, OpenAPI, evento SSE, persistencia de datos/sesiones tras reinicio y revocación de sesión. Las bases temporales se eliminan al terminar.
+
+La ampliación verifica la migración desde una base de la versión anterior, mensajes Unicode, adjuntos de imagen/audio, identificación de contenedor de video, límite 20 MB, rechazo de un archivo HTML declarado como imagen, permisos de medios, respuestas Range 206/416 y aislamiento de SSE privado. Las pruebas de video identifican el contenedor; no reproducen codecs ni prueban el micrófono. Esas verificaciones requieren un navegador y archivos reales.
+
+Referencias de implementación: [archivos en NestJS](https://docs.nestjs.com/techniques/file-upload) y [MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder).
 
 ## Lista de entrega
 

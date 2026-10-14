@@ -8,6 +8,8 @@
 | Seguimiento de usuarios | Tabla follows, perfil y feed Siguiendo | Probado por API; interfaz escrita |
 | Feed general o personalizado | Ambos, con paginación | Probado por API |
 | Tiempo real | SSE con invalidación y recarga del feed | Evento SSE probado; falta prueba visual con dos navegadores |
+| Mensajes privados (ampliación) | Texto, emojis, imagen/audio/video y SSE privado | Probados acceso, persistencia, límites y aislamiento de eventos |
+| Notas de voz (ampliación) | MediaRecorder, revisión y envío del audio | Implementado; prueba de micrófono en navegador pendiente |
 | Login/registro, feed y perfil | Componentes React responsive | Compilan; revisión visual pendiente |
 | Frontend/backend separados | Carpetas, procesos y contenedores independientes | Implementado |
 | API REST | /api con controladores y servicio | Probado |

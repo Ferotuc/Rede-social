@@ -6,6 +6,8 @@ import {SwaggerModule,DocumentBuilder} from '@nestjs/swagger';
 import helmet from 'helmet';
 import {SocialController,SessionGuard} from './controller';
 import {SocialService} from './social.service';
+import {ChatService} from './chat.service';
+import {ChatController} from './chat.controller';
 @Catch()
 class Errors implements ExceptionFilter {
  catch(error:unknown,host:ArgumentsHost){
@@ -16,7 +18,7 @@ class Errors implements ExceptionFilter {
   host.switchToHttp().getResponse().status(status).json({statusCode:status,message:Array.isArray(raw)?raw.join(' · '):raw||'Ocurrió un error interno.',timestamp:new Date().toISOString()});
  }
 }
-@Module({controllers:[SocialController],providers:[SocialService,SessionGuard]})
+@Module({controllers:[SocialController,ChatController],providers:[SocialService,SessionGuard,ChatService]})
 class AppModule {}
 async function start(){
  const app=await NestFactory.create(AppModule);
@@ -45,7 +47,7 @@ async function start(){
  app.useGlobalFilters(new Errors());
  const config=new DocumentBuilder().setTitle('Campus API').setDescription('Mini red social estudiantil. Autenticación con cookie HttpOnly. GET públicos; mutaciones requieren sesión y Origin autorizado. Errores: {statusCode,message,timestamp}.').setVersion('1.0').addCookieAuth('campus_session').build();
  const doc=SwaggerModule.createDocument(app,config);
- for(const item of Object.values(doc.paths))for(const op of Object.values(item||{}))if(op&&typeof op==='object'&&'responses' in op){const responses=(op as any).responses;for(const [code,description] of Object.entries({'400':'Datos inválidos','401':'Sesión requerida o expirada','403':'Operación no permitida','404':'Recurso no encontrado','409':'Correo o usuario duplicado','429':'Límite de autenticación superado'}))responses[code]??={description};}
+ for(const item of Object.values(doc.paths))for(const op of Object.values(item||{}))if(op&&typeof op==='object'&&'responses' in op){const responses=(op as any).responses;for(const [code,description] of Object.entries({'400':'Datos inválidos','401':'Sesión requerida o expirada','403':'Operación no permitida','404':'Recurso no encontrado','409':'Correo o usuario duplicado','413':'Archivo demasiado grande','429':'Límite de autenticación superado'}))responses[code]??={description};}
  SwaggerModule.setup('api/docs',app,doc,{jsonDocumentUrl:'api/openapi.json',swaggerOptions:{withCredentials:true}});
  app.enableShutdownHooks();
  await app.listen(Number(process.env.PORT||3001),'0.0.0.0');
