@@ -4,6 +4,14 @@ Aplicación para compartir publicaciones de texto, dar me gusta, comentar y segu
 
 También incluye **mensajes privados** con texto, emojis, imágenes, archivos de audio y videos; permite grabar notas de voz desde el navegador.
 
+## Publicar emojis, imágenes, audio y video
+
+El cuadro **Publicar** también dispone de **😊**, **Adjuntar** y **Voz**. Permite compartir texto con emojis, una imagen, un archivo de audio/video o una nota grabada. Seleccionar el archivo, revisar la vista previa y pulsar **Publicar**. Se admite un adjunto de hasta 20 MB por publicación; sin texto se genera una descripción breve como "Imagen compartida".
+
+Estos archivos son públicos, como el feed. Los mensajes de la sección **Mensajes** continúan siendo privados. La migración `003_public_media.sql` almacena los adjuntos en una tabla aparte, sin modificar publicaciones anteriores. Borrar la publicación elimina también su adjunto. La cuota de archivos publicados es de 200 MB por cuenta, independiente de la cuota del chat.
+
+Si trabajas en la carpeta original generada por Codex, los cambios ya están en el código local. Reinicia el backend y el frontend. Para fijar correctamente el puerto del frontend usa `npm --prefix frontend run dev -- --port 5174 --strictPort`; las opciones de Vite deben ir después del segundo `--`.
+
 ## Usar mensajes y archivos
 
 1. Iniciar sesión y abrir **Mensajes** en la barra lateral.

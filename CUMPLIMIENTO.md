@@ -10,6 +10,7 @@
 | Tiempo real | SSE con invalidación y recarga del feed | Evento SSE probado; falta prueba visual con dos navegadores |
 | Mensajes privados (ampliación) | Texto, emojis, imagen/audio/video y SSE privado | Probados acceso, persistencia, límites y aislamiento de eventos |
 | Notas de voz (ampliación) | MediaRecorder, revisión y envío del audio | Implementado; prueba de micrófono en navegador pendiente |
+| Publicaciones multimedia (ampliación) | Emojis, imagen/audio/video y notas de voz en el feed | Adjuntos, permisos de borrado y persistencia probados por API |
 | Login/registro, feed y perfil | Componentes React responsive | Compilan; revisión visual pendiente |
 | Frontend/backend separados | Carpetas, procesos y contenedores independientes | Implementado |
 | API REST | /api con controladores y servicio | Probado |

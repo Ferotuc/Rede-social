@@ -4,12 +4,12 @@ import './chat.css';
 type Message={id:number;sender_id:number;recipient_id:number;content:string;media_url:string|null;media_kind:'image'|'audio'|'video'|null;created_at:string};
 const EMOJIS=['😀','😂','😊','😍','🥳','😎','🤔','😢','❤️','👍','👏','🙏','🔥','🎉','📚','💡'];
 const LIMIT=20*1024*1024;
-function Attachment({url,kind}:{url:string;kind:string}){
+export function Attachment({url,kind}:{url:string;kind:string}){
  if(kind==='image')return <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Imagen adjunta al mensaje" className="chat-image" crossOrigin="use-credentials"/></a>;
  if(kind==='audio')return <audio controls preload="metadata" src={url} crossOrigin="use-credentials">Tu navegador no puede reproducir este audio.</audio>;
  return <video controls preload="metadata" src={url} crossOrigin="use-credentials">Tu navegador no puede reproducir este video.</video>;
 }
-function MessageComposer({peer,onSent}:{peer:User;onSent:()=>void}){
+export function MessageComposer({peer,onSent,publish=false}:{peer:User;onSent:()=>void;publish?:boolean}){
  const [text,setText]=useState(''),[file,setFile]=useState<File|null>(null),[preview,setPreview]=useState(''),[error,setError]=useState(''),[sending,setSending]=useState(false),[recording,setRecording]=useState(false),[requestingMic,setRequestingMic]=useState(false),[seconds,setSeconds]=useState(0),[emojis,setEmojis]=useState(false);
  const recorder=useRef<MediaRecorder|null>(null),stream=useRef<MediaStream|null>(null),mounted=useRef(true),discard=useRef(false),recordTimer=useRef<ReturnType<typeof setTimeout>|null>(null),input=useRef<HTMLInputElement>(null),textarea=useRef<HTMLTextAreaElement>(null);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;discard.current=true;if(recordTimer.current)clearTimeout(recordTimer.current);if(recorder.current?.state==='recording')recorder.current.stop();stream.current?.getTracks().forEach(t=>t.stop());};},[]);
@@ -42,17 +42,17 @@ function MessageComposer({peer,onSent}:{peer:User;onSent:()=>void}){
  async function send(e:FormEvent){
   e.preventDefault();if(sending||recording||(!text.trim()&&!file))return;
   setSending(true);setError('');
-  try{const data=new FormData();if(text.trim())data.set('content',text.trim());if(file)data.set('file',file);const response=await fetch(`${BASE}/api/chat/${peer.id}/messages`,{method:'POST',credentials:'include',body:data});if(!response.ok){const result=await response.json().catch(()=>({message:'No se pudo enviar el mensaje.'}));throw Error(result.message);}if(mounted.current){setText('');setFile(null);setEmojis(false);onSent();}}
+  try{if(publish&&!file){await api('/posts','POST',{content:text.trim()});}else{const data=new FormData();if(text.trim())data.set('content',text.trim());if(file)data.set('file',file);const response=await fetch(`${BASE}/api${publish?'/posts/media':`/chat/${peer.id}/messages`}`,{method:'POST',credentials:'include',body:data});if(!response.ok){const result=await response.json().catch(()=>({message:'No se pudo enviar.'}));throw Error(result.message);}}if(mounted.current){setText('');setFile(null);setEmojis(false);onSent();}}
   catch(err){if(mounted.current)setError((err as Error).message);}finally{if(mounted.current)setSending(false);}
  }
  return <form className="message-composer" onSubmit={send}>
   {file&&<div className="attachment-preview"><div>{file.type.startsWith('image/')?<img src={preview} alt="Vista previa del archivo seleccionado"/>:file.type.startsWith('audio/')?<audio controls src={preview}/>:file.type.startsWith('video/')?<video controls src={preview}/>:null}<small>{file.name} · {(file.size/1024/1024).toFixed(1)} MB</small></div><button type="button" className="text-btn" disabled={sending||recording} onClick={()=>setFile(null)}>Quitar</button></div>}
   {recording&&<div className="recording-status" role="status">● Grabando {Math.floor(seconds/60)}:{String(seconds%60).padStart(2,'0')}<button type="button" className="outline" onClick={()=>recorder.current?.stop()}>Terminar</button><button type="button" className="text-btn" onClick={()=>{discard.current=true;recorder.current?.stop();}}>Cancelar</button></div>}
-  <label className="sr-only" htmlFor="message-text">Mensaje para {peer.name}</label><textarea ref={textarea} id="message-text" value={text} onChange={e=>setText(e.target.value)} placeholder={`Escribe a ${peer.name.split(' ')[0]}…`} maxLength={2000} disabled={sending||recording}/>
-  {emojis&&<div className="emoji-picker" aria-label="Emojis">{EMOJIS.map(value=><button type="button" key={value} aria-label={`Insertar ${value}`} disabled={sending||recording||text.length>1997} onClick={()=>emoji(value)}>{value}</button>)}</div>}
-  <div className="message-tools"><div><button type="button" className="outline" disabled={sending||recording||requestingMic} aria-expanded={emojis} onClick={()=>setEmojis(!emojis)}>😊</button><button type="button" className="outline" disabled={sending||recording||requestingMic} onClick={()=>input.current?.click()}>📎 Adjuntar</button><button type="button" className="outline" disabled={sending||recording||requestingMic} onClick={()=>void startRecording()}>{requestingMic?'Esperando permiso…':'🎙 Voz'}</button></div><button className="primary" disabled={sending||recording||requestingMic||(!text.trim()&&!file)}>{sending?'Enviando…':'Enviar ↗'}</button></div>
+  <label className="sr-only" htmlFor={publish?'publication-text':'message-text'}>{publish?'Nueva publicación':`Mensaje para ${peer.name}`}</label><textarea ref={textarea} id={publish?'publication-text':'message-text'} value={text} onChange={e=>setText(e.target.value)} placeholder={publish?`¿Qué estás aprendiendo, ${peer.name.split(' ')[0]}?`:`Escribe a ${peer.name.split(' ')[0]}…`} maxLength={publish?1000:2000} disabled={sending||recording}/>
+  {emojis&&<div className="emoji-picker" aria-label="Emojis">{EMOJIS.map(value=><button type="button" key={value} aria-label={`Insertar ${value}`} disabled={sending||recording||text.length>(publish?997:1997)} onClick={()=>emoji(value)}>{value}</button>)}</div>}
+  <div className="message-tools"><div><button type="button" className="outline" disabled={sending||recording||requestingMic} aria-expanded={emojis} onClick={()=>setEmojis(!emojis)}>😊</button><button type="button" className="outline" disabled={sending||recording||requestingMic} onClick={()=>input.current?.click()}>📎 Adjuntar</button><button type="button" className="outline" disabled={sending||recording||requestingMic} onClick={()=>void startRecording()}>{requestingMic?'Esperando permiso…':'🎙 Voz'}</button></div><button className="primary" disabled={sending||recording||requestingMic||(!text.trim()&&!file)}>{sending?(publish?'Publicando…':'Enviando…'):publish?'Publicar ↗':'Enviar ↗'}</button></div>
   <input className="sr-only" ref={input} type="file" accept="image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/x-m4a,audio/webm,video/mp4,video/webm" aria-label="Adjuntar imagen, audio o video" onChange={e=>{attach(e.target.files?.[0]);e.target.value='';}}/>
-  <small className="muted">Un archivo por mensaje, hasta 20 MB. Notas de voz de hasta 2 minutos.</small>{error&&<p className="error" role="alert">{error}</p>}
+  <small className="muted">{publish?'Visible para toda la comunidad. ':''}Un archivo, hasta 20 MB. Notas de voz de hasta 2 minutos.</small>{error&&<p className="error" role="alert">{error}</p>}
  </form>;
 }
 export default function Chat({me,users,onClose}:{me:User;users:User[];onClose:()=>void}){

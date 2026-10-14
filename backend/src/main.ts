@@ -8,6 +8,7 @@ import {SocialController,SessionGuard} from './controller';
 import {SocialService} from './social.service';
 import {ChatService} from './chat.service';
 import {ChatController} from './chat.controller';
+import {PostMediaController} from './post-media.controller';
 @Catch()
 class Errors implements ExceptionFilter {
  catch(error:unknown,host:ArgumentsHost){
@@ -18,7 +19,7 @@ class Errors implements ExceptionFilter {
   host.switchToHttp().getResponse().status(status).json({statusCode:status,message:Array.isArray(raw)?raw.join(' · '):raw||'Ocurrió un error interno.',timestamp:new Date().toISOString()});
  }
 }
-@Module({controllers:[SocialController,ChatController],providers:[SocialService,SessionGuard,ChatService]})
+@Module({controllers:[SocialController,ChatController,PostMediaController],providers:[SocialService,SessionGuard,ChatService]})
 class AppModule {}
 async function start(){
  const app=await NestFactory.create(AppModule);
