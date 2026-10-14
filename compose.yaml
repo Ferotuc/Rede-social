@@ -10,22 +10,22 @@ services:
     volumes:
       - campus-data:/data
     expose:
-      - "3001"
+      - '3001'
   frontend:
     build: ./frontend
     restart: unless-stopped
     depends_on:
       - backend
     expose:
-      - "80"
+      - '80'
   gateway:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
       SITE_HOST: ${SITE_HOST:-localhost}
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

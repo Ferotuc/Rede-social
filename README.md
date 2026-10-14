@@ -1,5 +1,16 @@
 # Campus - Mini red social estudiantil
 
+## Formato del código
+
+El código fuente utiliza Prettier, con sangría de dos espacios y saltos de línea legibles.
+
+```powershell
+npm run format
+npm run format:check
+```
+
+El primer comando aplica el formato; el segundo comprueba que se respete. La carpeta `.vscode` recomienda la extensión `esbenp.prettier-vscode` y activa el formato al guardar cuando esté instalada. Se excluyen dependencias, compilaciones, bases de datos y archivos `.env`.
+
 Aplicación para compartir publicaciones de texto, dar me gusta, comentar y seguir a otros estudiantes. Incluye feed general, feed de personas seguidas, perfiles editables y actualizaciones de interfaz en tiempo real mediante Server-Sent Events (SSE).
 
 También incluye **mensajes privados** con texto, emojis, imágenes, archivos de audio y videos; permite grabar notas de voz desde el navegador.
@@ -113,16 +124,16 @@ No borrar el volumen `campus-data` al actualizar. Para respaldar una instancia p
 
 ## API y permisos
 
-| Grupo | Operaciones |
-|---|---|
-| Autenticación | POST `/auth/register`, `/auth/login`, `/auth/logout`; GET `/auth/me` |
-| Usuarios | GET `/users`, `/users/:id`; PATCH `/users/me` |
-| Seguimiento | PUT y DELETE `/users/:id/follow` |
-| Publicaciones | GET y POST `/posts`; GET y DELETE `/posts/:id` |
-| Likes | PUT y DELETE `/posts/:id/like` |
-| Comentarios | GET y POST `/posts/:id/comments` |
-| Tiempo real | GET `/events` con `text/event-stream` |
-| Chat privado | GET y POST `/chat/:id/messages`; GET `/chat/media/:id`; GET `/chat/events` |
+| Grupo         | Operaciones                                                                |
+| ------------- | -------------------------------------------------------------------------- |
+| Autenticación | POST `/auth/register`, `/auth/login`, `/auth/logout`; GET `/auth/me`       |
+| Usuarios      | GET `/users`, `/users/:id`; PATCH `/users/me`                              |
+| Seguimiento   | PUT y DELETE `/users/:id/follow`                                           |
+| Publicaciones | GET y POST `/posts`; GET y DELETE `/posts/:id`                             |
+| Likes         | PUT y DELETE `/posts/:id/like`                                             |
+| Comentarios   | GET y POST `/posts/:id/comments`                                           |
+| Tiempo real   | GET `/events` con `text/event-stream`                                      |
+| Chat privado  | GET y POST `/chat/:id/messages`; GET `/chat/media/:id`; GET `/chat/events` |
 
 Prefijo común: `/api`. Feed paginado: `?page=1&mode=all`, `mode=following` o `author=ID`. Las lecturas son públicas; las mutaciones requieren sesión, salvo registro/login. Solo el autor puede borrar su publicación o modificar su perfil. Likes y seguimientos son idempotentes y poseen claves compuestas únicas. No se permite seguirse a uno mismo.
 
@@ -156,4 +167,3 @@ Referencias de implementación: [archivos en NestJS](https://docs.nestjs.com/tec
 - [ ] README con URLs públicas definitivas.
 - [ ] PDF con nombre, carné, arquitectura, tecnologías, capturas y enlaces funcionales.
 - [ ] PDF subido a Canvas antes del 31 de octubre de 2026, 23:59 (Guatemala).
-

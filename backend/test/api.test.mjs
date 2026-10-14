@@ -1,100 +1,445 @@
-import {test} from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
-import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
-import {DatabaseSync} from 'node:sqlite';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
-const origin='http://localhost:5173',base='http://127.0.0.1:3099/api';
-test('flujo completo, seguridad, SSE, persistencia y migraciones',async()=>{
- const dir=mkdtempSync(join(tmpdir(),'campus-test-'));let child;
- const start=async()=>{child=spawn(process.execPath,['dist/main.js'],{env:{...process.env,PORT:'3099',DATABASE_PATH:join(dir,'test.db'),FRONTEND_ORIGIN:origin,NODE_ENV:'test'},stdio:'pipe'});let log='';child.stderr.on('data',data=>log+=data);child.stdout.on('data',data=>log+=data);for(let n=0;n<150;n++){try{if((await fetch(base+'/health')).ok)return;}catch{}if(child.exitCode!==null)throw Error(log);await new Promise(r=>setTimeout(r,100));}throw Error('API no inició: '+log);};
- const stop=async()=>{if(child&&child.exitCode===null){child.kill();await new Promise(r=>child.once('exit',r));}};
- const request=(path,method='GET',body,cookie)=>fetch(base+path,{method,headers:{Origin:origin,...(body?{'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined});
- try{
-  const legacy=new DatabaseSync(join(dir,'test.db'));legacy.exec(readFileSync('migrations/001_initial.sql','utf8'));legacy.exec("CREATE TABLE schema_migrations(name TEXT PRIMARY KEY); INSERT INTO schema_migrations VALUES('001_initial.sql'); INSERT INTO users(name,username,email,password_hash) VALUES('Usuario existente','legacy','legacy@example.com','solo-fixture'); INSERT INTO posts(user_id,content) VALUES(1,'Publicación anterior a la migración');");legacy.close();
-  await start();
-  const preserved=await (await request('/users/1')).json();assert.equal(preserved.username,'legacy');assert.equal((await (await request('/posts/1')).json()).content,'Publicación anterior a la migración');
-  assert.equal((await request('/posts','POST',{content:'Sin sesión'})).status,401);
-  const invalid=await request('/auth/register','POST',{name:'A',username:'!',email:'no',password:'123',extra:true});assert.equal(invalid.status,400);
-  const account={name:'Estudiante Uno',username:'uno',email:'uno@example.com',password:'segura-12345'};
-  const registered=await request('/auth/register','POST',account);assert.equal(registered.status,201);const cookie=registered.headers.get('set-cookie').split(';')[0];assert.match(registered.headers.get('set-cookie'),/HttpOnly/i);const user=await registered.json();assert.equal(user.password_hash,undefined);
-  assert.equal((await request('/auth/register','POST',account)).status,409);
-  assert.equal((await request('/auth/login','POST',{email:account.email,password:'incorrecta'})).status,401);
-  const login=await request('/auth/login','POST',{email:account.email,password:account.password});assert.equal(login.status,200);
-  const second=await request('/auth/register','POST',{...account,name:'Estudiante Dos',username:'dos',email:'dos@example.com'});const cookie2=second.headers.get('set-cookie').split(';')[0];const user2=await second.json();
-  assert.equal((await request('/posts','POST',{content:'    '},cookie)).status,400);
-  assert.equal((await request('/posts','POST',{content:'válido',extra:'no'},cookie)).status,400);
-  const controller=new AbortController();const stream=await fetch(base+'/events',{signal:controller.signal});assert.equal(stream.status,200);assert.match(stream.headers.get('content-type'),/text\/event-stream/);const reader=stream.body.getReader();const eventPromise=(async()=>{let text='';while(!text.includes('data:')){const chunk=await reader.read();if(chunk.done)throw Error('SSE cerró prematuramente');text+=new TextDecoder().decode(chunk.value);}return text;})();
-  const created=await request('/posts','POST',{content:'Mi primera idea'},cookie);assert.equal(created.status,201);const post=await created.json();
-  let timeout;const event=await Promise.race([eventPromise,new Promise((_,reject)=>{timeout=setTimeout(()=>reject(Error('SSE no recibió evento')),4000);})]);clearTimeout(timeout);assert.match(event,/post/);controller.abort();
-  assert.equal((await request(`/posts/${post.id}`,'DELETE',undefined,cookie2)).status,403);
-  assert.equal((await request(`/posts/${post.id}/like`,'PUT',undefined,cookie2)).status,200);await request(`/posts/${post.id}/like`,'PUT',undefined,cookie2);
-  let feed=await (await request('/posts', 'GET',undefined,cookie2)).json();assert.equal(feed[0].likes,1);assert.equal(feed[0].liked,true);
-  assert.equal((await request(`/posts/${post.id}/comments`,'POST',{content:'Gran idea'},cookie2)).status,201);
-  assert.equal((await (await request(`/posts/${post.id}/comments`)).json()).length,1);
-  assert.equal((await request(`/users/${user.id}/follow`,'PUT',undefined,cookie2)).status,200);
-  assert.equal((await (await request('/posts?mode=following','GET',undefined,cookie2)).json()).length,1);
-  assert.equal((await request(`/users/${user2.id}/follow`,'PUT',undefined,cookie2)).status,400);
-  assert.equal((await request('/users/me','PATCH',{bio:'Aprendo desarrollo web'},cookie)).status,200);
-  assert.equal((await request('/posts/999999')).status,404);
-  assert.equal((await request('/posts?page=-1')).status,400);
-  assert.equal((await fetch(base+'/posts',{method:'POST',headers:{Origin:'https://evil.example','Content-Type':'application/json',Cookie:cookie},body:JSON.stringify({content:'CSRF'})})).status,403);
-  assert.equal((await fetch(base+'/posts',{method:'POST',headers:{'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify({content:'CSRF'})})).status,403);
-  const allowed=await request('/posts');assert.equal(allowed.headers.get('access-control-allow-origin'),origin);
-  const doc=await (await request('/openapi.json')).json();assert.ok(doc.paths['/api/posts']);assert.ok(doc.components.schemas.RegisterDto.properties.password);
-  // Private messages: test participants, uploads, streaming and isolation.
-  const third=await request('/auth/register','POST',{...account,name:'Estudiante Tres',username:'tres',email:'tres@example.com'});const cookie3=third.headers.get('set-cookie').split(';')[0];
-  const upload=(target,text,bytes,type,name,session=cookie)=>{const data=new FormData();if(text!==undefined)data.append('content',text);if(bytes)data.append('file',new Blob([bytes],{type}),name);return fetch(base+`/chat/${target}/messages`,{method:'POST',headers:{Origin:origin,...(session?{Cookie:session}:{})},body:data});};
-  assert.equal((await request(`/chat/${user2.id}/messages`)).status,401);
-  assert.equal((await upload(user2.id,'hola',undefined,undefined,undefined,'')).status,401);
-  assert.equal((await upload(user.id,'hola')).status,400);
-  assert.equal((await upload(user2.id,'   ')).status,400);
-  assert.equal((await upload(user2.id,'x'.repeat(2001))).status,400);
-  const privateAbort=new AbortController();const privateStream=await fetch(base+'/chat/events',{headers:{Cookie:cookie2,Origin:origin},signal:privateAbort.signal});assert.equal(privateStream.status,200);
-  const privateReader=privateStream.body.getReader();const privateEvent=(async()=>{let text='';while(!text.includes('data:')){const chunk=await privateReader.read();text+=new TextDecoder().decode(chunk.value);}return text;})();
-  const strangerAbort=new AbortController();const strangerStream=await fetch(base+'/chat/events',{headers:{Cookie:cookie3,Origin:origin},signal:strangerAbort.signal});const strangerReader=strangerStream.body.getReader();
-  let leaked=false;const strangerWatch=(async()=>{try{let text='';while(true){const chunk=await strangerReader.read();if(chunk.done)break;text+=new TextDecoder().decode(chunk.value);if(text.includes('message')){leaked=true;break;}}}catch{}})();
-  const textMessage=await upload(user2.id,'Hola 😊 ❤️');assert.equal(textMessage.status,201);
-  let privateTimeout;const notification=await Promise.race([privateEvent,new Promise((_,reject)=>{privateTimeout=setTimeout(()=>reject(Error('Evento privado ausente')),4000);})]);clearTimeout(privateTimeout);assert.match(notification,/message/);privateAbort.abort();
-  await new Promise(resolve=>setTimeout(resolve,150));strangerAbort.abort();await strangerWatch;assert.equal(leaked,false);
-  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhXcAAAAASUVORK5CYII=','base64');
-  const imageResponse=await upload(user2.id,'Una imagen',png,'image/png','prueba.png');assert.equal(imageResponse.status,201);const imageMessage=await imageResponse.json();assert.equal(imageMessage.media_kind,'image');
-  const media=await fetch(base+`/chat/media/${imageMessage.id}`,{headers:{Cookie:cookie2}});assert.equal(media.status,200);assert.equal(media.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await media.arrayBuffer()),png);
-  assert.equal((await fetch(base+`/chat/media/${imageMessage.id}`)).status,401);
-  assert.equal((await fetch(base+`/chat/media/${imageMessage.id}`,{headers:{Cookie:cookie3}})).status,403);
-  const partial=await fetch(base+`/chat/media/${imageMessage.id}`,{headers:{Cookie:cookie2,Range:'bytes=0-7'}});assert.equal(partial.status,206);assert.deepEqual(Buffer.from(await partial.arrayBuffer()),png.subarray(0,8));
-  assert.equal((await fetch(base+`/chat/media/${imageMessage.id}`,{headers:{Cookie:cookie2,Range:'bytes=99999-'}})).status,416);
-  assert.equal((await upload(user2.id,'',Buffer.from('<script>alert(1)</script>'),'image/png','falso.png')).status,400);
-  assert.equal((await upload(user2.id,'',Buffer.alloc(21*1024*1024),'image/png','grande.png')).status,413);
-  const wav=Buffer.alloc(8044);wav.write('RIFF');wav.writeUInt32LE(8036,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(8000,28);wav.writeUInt16LE(1,32);wav.writeUInt16LE(8,34);wav.write('data',36);wav.writeUInt32LE(8000,40);wav.fill(128,44);
-  const audioResponse=await upload(user2.id,'',wav,'audio/wav','nota.wav');assert.equal(audioResponse.status,201);assert.equal((await audioResponse.json()).media_kind,'audio');
-  const mp4Header=Buffer.from([0,0,0,24,102,116,121,112,105,115,111,109,0,0,0,0,105,115,111,109,109,112,52,50]);
-  const videoResponse=await upload(user2.id,'Video',mp4Header,'video/mp4','video.mp4');assert.equal(videoResponse.status,201);assert.equal((await videoResponse.json()).media_kind,'video');
-  const history=await (await request(`/chat/${user.id}/messages`,'GET',undefined,cookie2)).json();assert.equal(history.length,4);assert.equal(history[0].content,'Hola 😊 ❤️');assert.equal(history[1].media,undefined);
-  assert.equal((await (await request(`/chat/${user.id}/messages`,'GET',undefined,cookie3)).json()).length,0);
-  const publishMedia=(text,bytes,type,name,session=cookie)=>{const form=new FormData();if(text!==undefined)form.append('content',text);if(bytes)form.append('file',new Blob([bytes],{type}),name);return fetch(base+'/posts/media',{method:'POST',headers:{Origin:origin,...(session?{Cookie:session}:{})},body:form});};
-  assert.equal((await publishMedia('Hola',png,'image/png','imagen.png','')).status,401);
-  assert.equal((await publishMedia('Sin archivo')).status,400);
-  assert.equal((await publishMedia('x'.repeat(1001),png,'image/png','imagen.png')).status,400);
-  assert.equal((await publishMedia('',Buffer.from('<html>no</html>'),'image/png','falsa.png')).status,400);
-  const publicImageResponse=await publishMedia('Una idea con imagen 😊',png,'image/png','imagen.png');assert.equal(publicImageResponse.status,201);const publicImage=await publicImageResponse.json();assert.equal(publicImage.media_kind,'image');
-  const publicAudioResponse=await publishMedia('',wav,'audio/wav','voz.wav');assert.equal(publicAudioResponse.status,201);const publicAudio=await publicAudioResponse.json();assert.equal(publicAudio.content,'Audio compartido');
-  const publicVideoResponse=await publishMedia('Mi video',mp4Header,'video/mp4','clip.mp4');assert.equal(publicVideoResponse.status,201);const publicVideo=await publicVideoResponse.json();assert.equal(publicVideo.media_kind,'video');
-  const publicFeed=await (await request('/posts')).json();assert.equal(publicFeed.find(row=>row.id===publicImage.id).media_url,`/api/posts/media/${publicImage.id}`);
-  const publicBytes=await request(`/posts/media/${publicImage.id}`);assert.equal(publicBytes.status,200);assert.deepEqual(Buffer.from(await publicBytes.arrayBuffer()),png);
-  const publicRange=await fetch(base+`/posts/media/${publicAudio.id}`,{headers:{Range:'bytes=0-9'}});assert.equal(publicRange.status,206);assert.deepEqual(Buffer.from(await publicRange.arrayBuffer()),wav.subarray(0,10));
-  assert.equal((await request(`/posts/${publicImage.id}`,'DELETE',undefined,cookie2)).status,403);
-  await stop();await start();feed=await (await request('/posts')).json();assert.equal(feed.find(row=>row.id===post.id).content,'Mi primera idea');assert.equal((await request('/auth/me','GET',undefined,cookie)).status,200);
-  const persistedPublic=await request(`/posts/media/${publicImage.id}`);assert.deepEqual(Buffer.from(await persistedPublic.arrayBuffer()),png);
-  for(const mediaPost of [publicImage,publicAudio,publicVideo])assert.equal((await request(`/posts/${mediaPost.id}`,'DELETE',undefined,cookie)).status,204);
-  assert.equal((await request(`/posts/media/${publicImage.id}`)).status,404);
-  assert.equal((await (await request(`/chat/${user.id}/messages`,'GET',undefined,cookie2)).json()).length,4);
-  const persistedMedia=await fetch(base+`/chat/media/${imageMessage.id}`,{headers:{Cookie:cookie2}});assert.deepEqual(Buffer.from(await persistedMedia.arrayBuffer()),png);
-  assert.equal((await request(`/posts/${post.id}`,'DELETE',undefined,cookie)).status,204);
-  assert.equal((await request(`/posts/${post.id}/comments`)).status,404);
-  await request('/auth/logout','POST',undefined,cookie);assert.equal((await request('/auth/me','GET',undefined,cookie)).status,401);
-  for(let n=0;n<32;n++)await request('/auth/login','POST',{email:account.email,password:'mala'});
-  assert.equal((await request('/auth/login','POST',{email:account.email,password:'mala'})).status,429);
- }finally{await stop();rmSync(dir,{recursive:true,force:true});}
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const origin = 'http://localhost:5173',
+  base = 'http://127.0.0.1:3099/api';
+test('flujo completo, seguridad, SSE, persistencia y migraciones', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'campus-test-'));
+  let child;
+  const start = async () => {
+    child = spawn(process.execPath, ['dist/main.js'], {
+      env: {
+        ...process.env,
+        PORT: '3099',
+        DATABASE_PATH: join(dir, 'test.db'),
+        FRONTEND_ORIGIN: origin,
+        NODE_ENV: 'test',
+      },
+      stdio: 'pipe',
+    });
+    let log = '';
+    child.stderr.on('data', (data) => (log += data));
+    child.stdout.on('data', (data) => (log += data));
+    for (let n = 0; n < 150; n++) {
+      try {
+        if ((await fetch(base + '/health')).ok) return;
+      } catch {}
+      if (child.exitCode !== null) throw Error(log);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw Error('API no inició: ' + log);
+  };
+  const stop = async () => {
+    if (child && child.exitCode === null) {
+      child.kill();
+      await new Promise((r) => child.once('exit', r));
+    }
+  };
+  const request = (path, method = 'GET', body, cookie) =>
+    fetch(base + path, {
+      method,
+      headers: {
+        Origin: origin,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  try {
+    const legacy = new DatabaseSync(join(dir, 'test.db'));
+    legacy.exec(readFileSync('migrations/001_initial.sql', 'utf8'));
+    legacy.exec(
+      "CREATE TABLE schema_migrations(name TEXT PRIMARY KEY); INSERT INTO schema_migrations VALUES('001_initial.sql'); INSERT INTO users(name,username,email,password_hash) VALUES('Usuario existente','legacy','legacy@example.com','solo-fixture'); INSERT INTO posts(user_id,content) VALUES(1,'Publicación anterior a la migración');",
+    );
+    legacy.close();
+    await start();
+    const preserved = await (await request('/users/1')).json();
+    assert.equal(preserved.username, 'legacy');
+    assert.equal(
+      (await (await request('/posts/1')).json()).content,
+      'Publicación anterior a la migración',
+    );
+    assert.equal((await request('/posts', 'POST', { content: 'Sin sesión' })).status, 401);
+    const invalid = await request('/auth/register', 'POST', {
+      name: 'A',
+      username: '!',
+      email: 'no',
+      password: '123',
+      extra: true,
+    });
+    assert.equal(invalid.status, 400);
+    const account = {
+      name: 'Estudiante Uno',
+      username: 'uno',
+      email: 'uno@example.com',
+      password: 'segura-12345',
+    };
+    const registered = await request('/auth/register', 'POST', account);
+    assert.equal(registered.status, 201);
+    const cookie = registered.headers.get('set-cookie').split(';')[0];
+    assert.match(registered.headers.get('set-cookie'), /HttpOnly/i);
+    const user = await registered.json();
+    assert.equal(user.password_hash, undefined);
+    assert.equal((await request('/auth/register', 'POST', account)).status, 409);
+    assert.equal(
+      (await request('/auth/login', 'POST', { email: account.email, password: 'incorrecta' }))
+        .status,
+      401,
+    );
+    const login = await request('/auth/login', 'POST', {
+      email: account.email,
+      password: account.password,
+    });
+    assert.equal(login.status, 200);
+    const second = await request('/auth/register', 'POST', {
+      ...account,
+      name: 'Estudiante Dos',
+      username: 'dos',
+      email: 'dos@example.com',
+    });
+    const cookie2 = second.headers.get('set-cookie').split(';')[0];
+    const user2 = await second.json();
+    assert.equal((await request('/posts', 'POST', { content: '    ' }, cookie)).status, 400);
+    assert.equal(
+      (await request('/posts', 'POST', { content: 'válido', extra: 'no' }, cookie)).status,
+      400,
+    );
+    const controller = new AbortController();
+    const stream = await fetch(base + '/events', { signal: controller.signal });
+    assert.equal(stream.status, 200);
+    assert.match(stream.headers.get('content-type'), /text\/event-stream/);
+    const reader = stream.body.getReader();
+    const eventPromise = (async () => {
+      let text = '';
+      while (!text.includes('data:')) {
+        const chunk = await reader.read();
+        if (chunk.done) throw Error('SSE cerró prematuramente');
+        text += new TextDecoder().decode(chunk.value);
+      }
+      return text;
+    })();
+    const created = await request('/posts', 'POST', { content: 'Mi primera idea' }, cookie);
+    assert.equal(created.status, 201);
+    const post = await created.json();
+    let timeout;
+    const event = await Promise.race([
+      eventPromise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(Error('SSE no recibió evento')), 4000);
+      }),
+    ]);
+    clearTimeout(timeout);
+    assert.match(event, /post/);
+    controller.abort();
+    assert.equal((await request(`/posts/${post.id}`, 'DELETE', undefined, cookie2)).status, 403);
+    assert.equal((await request(`/posts/${post.id}/like`, 'PUT', undefined, cookie2)).status, 200);
+    await request(`/posts/${post.id}/like`, 'PUT', undefined, cookie2);
+    let feed = await (await request('/posts', 'GET', undefined, cookie2)).json();
+    assert.equal(feed[0].likes, 1);
+    assert.equal(feed[0].liked, true);
+    assert.equal(
+      (await request(`/posts/${post.id}/comments`, 'POST', { content: 'Gran idea' }, cookie2))
+        .status,
+      201,
+    );
+    assert.equal((await (await request(`/posts/${post.id}/comments`)).json()).length, 1);
+    assert.equal(
+      (await request(`/users/${user.id}/follow`, 'PUT', undefined, cookie2)).status,
+      200,
+    );
+    assert.equal(
+      (await (await request('/posts?mode=following', 'GET', undefined, cookie2)).json()).length,
+      1,
+    );
+    assert.equal(
+      (await request(`/users/${user2.id}/follow`, 'PUT', undefined, cookie2)).status,
+      400,
+    );
+    assert.equal(
+      (await request('/users/me', 'PATCH', { bio: 'Aprendo desarrollo web' }, cookie)).status,
+      200,
+    );
+    assert.equal((await request('/posts/999999')).status, 404);
+    assert.equal((await request('/posts?page=-1')).status, 400);
+    assert.equal(
+      (
+        await fetch(base + '/posts', {
+          method: 'POST',
+          headers: {
+            Origin: 'https://evil.example',
+            'Content-Type': 'application/json',
+            Cookie: cookie,
+          },
+          body: JSON.stringify({ content: 'CSRF' }),
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await fetch(base + '/posts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie },
+          body: JSON.stringify({ content: 'CSRF' }),
+        })
+      ).status,
+      403,
+    );
+    const allowed = await request('/posts');
+    assert.equal(allowed.headers.get('access-control-allow-origin'), origin);
+    const doc = await (await request('/openapi.json')).json();
+    assert.ok(doc.paths['/api/posts']);
+    assert.ok(doc.components.schemas.RegisterDto.properties.password);
+    // Private messages: test participants, uploads, streaming and isolation.
+    const third = await request('/auth/register', 'POST', {
+      ...account,
+      name: 'Estudiante Tres',
+      username: 'tres',
+      email: 'tres@example.com',
+    });
+    const cookie3 = third.headers.get('set-cookie').split(';')[0];
+    const upload = (target, text, bytes, type, name, session = cookie) => {
+      const data = new FormData();
+      if (text !== undefined) data.append('content', text);
+      if (bytes) data.append('file', new Blob([bytes], { type }), name);
+      return fetch(base + `/chat/${target}/messages`, {
+        method: 'POST',
+        headers: { Origin: origin, ...(session ? { Cookie: session } : {}) },
+        body: data,
+      });
+    };
+    assert.equal((await request(`/chat/${user2.id}/messages`)).status, 401);
+    assert.equal((await upload(user2.id, 'hola', undefined, undefined, undefined, '')).status, 401);
+    assert.equal((await upload(user.id, 'hola')).status, 400);
+    assert.equal((await upload(user2.id, '   ')).status, 400);
+    assert.equal((await upload(user2.id, 'x'.repeat(2001))).status, 400);
+    const privateAbort = new AbortController();
+    const privateStream = await fetch(base + '/chat/events', {
+      headers: { Cookie: cookie2, Origin: origin },
+      signal: privateAbort.signal,
+    });
+    assert.equal(privateStream.status, 200);
+    const privateReader = privateStream.body.getReader();
+    const privateEvent = (async () => {
+      let text = '';
+      while (!text.includes('data:')) {
+        const chunk = await privateReader.read();
+        text += new TextDecoder().decode(chunk.value);
+      }
+      return text;
+    })();
+    const strangerAbort = new AbortController();
+    const strangerStream = await fetch(base + '/chat/events', {
+      headers: { Cookie: cookie3, Origin: origin },
+      signal: strangerAbort.signal,
+    });
+    const strangerReader = strangerStream.body.getReader();
+    let leaked = false;
+    const strangerWatch = (async () => {
+      try {
+        let text = '';
+        while (true) {
+          const chunk = await strangerReader.read();
+          if (chunk.done) break;
+          text += new TextDecoder().decode(chunk.value);
+          if (text.includes('message')) {
+            leaked = true;
+            break;
+          }
+        }
+      } catch {}
+    })();
+    const textMessage = await upload(user2.id, 'Hola 😊 ❤️');
+    assert.equal(textMessage.status, 201);
+    let privateTimeout;
+    const notification = await Promise.race([
+      privateEvent,
+      new Promise((_, reject) => {
+        privateTimeout = setTimeout(() => reject(Error('Evento privado ausente')), 4000);
+      }),
+    ]);
+    clearTimeout(privateTimeout);
+    assert.match(notification, /message/);
+    privateAbort.abort();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    strangerAbort.abort();
+    await strangerWatch;
+    assert.equal(leaked, false);
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhXcAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const imageResponse = await upload(user2.id, 'Una imagen', png, 'image/png', 'prueba.png');
+    assert.equal(imageResponse.status, 201);
+    const imageMessage = await imageResponse.json();
+    assert.equal(imageMessage.media_kind, 'image');
+    const media = await fetch(base + `/chat/media/${imageMessage.id}`, {
+      headers: { Cookie: cookie2 },
+    });
+    assert.equal(media.status, 200);
+    assert.equal(media.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await media.arrayBuffer()), png);
+    assert.equal((await fetch(base + `/chat/media/${imageMessage.id}`)).status, 401);
+    assert.equal(
+      (await fetch(base + `/chat/media/${imageMessage.id}`, { headers: { Cookie: cookie3 } }))
+        .status,
+      403,
+    );
+    const partial = await fetch(base + `/chat/media/${imageMessage.id}`, {
+      headers: { Cookie: cookie2, Range: 'bytes=0-7' },
+    });
+    assert.equal(partial.status, 206);
+    assert.deepEqual(Buffer.from(await partial.arrayBuffer()), png.subarray(0, 8));
+    assert.equal(
+      (
+        await fetch(base + `/chat/media/${imageMessage.id}`, {
+          headers: { Cookie: cookie2, Range: 'bytes=99999-' },
+        })
+      ).status,
+      416,
+    );
+    assert.equal(
+      (
+        await upload(
+          user2.id,
+          '',
+          Buffer.from('<script>alert(1)</script>'),
+          'image/png',
+          'falso.png',
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (await upload(user2.id, '', Buffer.alloc(21 * 1024 * 1024), 'image/png', 'grande.png'))
+        .status,
+      413,
+    );
+    const wav = Buffer.alloc(8044);
+    wav.write('RIFF');
+    wav.writeUInt32LE(8036, 4);
+    wav.write('WAVEfmt ', 8);
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(8000, 24);
+    wav.writeUInt32LE(8000, 28);
+    wav.writeUInt16LE(1, 32);
+    wav.writeUInt16LE(8, 34);
+    wav.write('data', 36);
+    wav.writeUInt32LE(8000, 40);
+    wav.fill(128, 44);
+    const audioResponse = await upload(user2.id, '', wav, 'audio/wav', 'nota.wav');
+    assert.equal(audioResponse.status, 201);
+    assert.equal((await audioResponse.json()).media_kind, 'audio');
+    const mp4Header = Buffer.from([
+      0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109, 0, 0, 0, 0, 105, 115, 111, 109, 109, 112,
+      52, 50,
+    ]);
+    const videoResponse = await upload(user2.id, 'Video', mp4Header, 'video/mp4', 'video.mp4');
+    assert.equal(videoResponse.status, 201);
+    assert.equal((await videoResponse.json()).media_kind, 'video');
+    const history = await (
+      await request(`/chat/${user.id}/messages`, 'GET', undefined, cookie2)
+    ).json();
+    assert.equal(history.length, 4);
+    assert.equal(history[0].content, 'Hola 😊 ❤️');
+    assert.equal(history[1].media, undefined);
+    assert.equal(
+      (await (await request(`/chat/${user.id}/messages`, 'GET', undefined, cookie3)).json()).length,
+      0,
+    );
+    const publishMedia = (text, bytes, type, name, session = cookie) => {
+      const form = new FormData();
+      if (text !== undefined) form.append('content', text);
+      if (bytes) form.append('file', new Blob([bytes], { type }), name);
+      return fetch(base + '/posts/media', {
+        method: 'POST',
+        headers: { Origin: origin, ...(session ? { Cookie: session } : {}) },
+        body: form,
+      });
+    };
+    assert.equal((await publishMedia('Hola', png, 'image/png', 'imagen.png', '')).status, 401);
+    assert.equal((await publishMedia('Sin archivo')).status, 400);
+    assert.equal(
+      (await publishMedia('x'.repeat(1001), png, 'image/png', 'imagen.png')).status,
+      400,
+    );
+    assert.equal(
+      (await publishMedia('', Buffer.from('<html>no</html>'), 'image/png', 'falsa.png')).status,
+      400,
+    );
+    const publicImageResponse = await publishMedia(
+      'Una idea con imagen 😊',
+      png,
+      'image/png',
+      'imagen.png',
+    );
+    assert.equal(publicImageResponse.status, 201);
+    const publicImage = await publicImageResponse.json();
+    assert.equal(publicImage.media_kind, 'image');
+    const publicAudioResponse = await publishMedia('', wav, 'audio/wav', 'voz.wav');
+    assert.equal(publicAudioResponse.status, 201);
+    const publicAudio = await publicAudioResponse.json();
+    assert.equal(publicAudio.content, 'Audio compartido');
+    const publicVideoResponse = await publishMedia('Mi video', mp4Header, 'video/mp4', 'clip.mp4');
+    assert.equal(publicVideoResponse.status, 201);
+    const publicVideo = await publicVideoResponse.json();
+    assert.equal(publicVideo.media_kind, 'video');
+    const publicFeed = await (await request('/posts')).json();
+    assert.equal(
+      publicFeed.find((row) => row.id === publicImage.id).media_url,
+      `/api/posts/media/${publicImage.id}`,
+    );
+    const publicBytes = await request(`/posts/media/${publicImage.id}`);
+    assert.equal(publicBytes.status, 200);
+    assert.deepEqual(Buffer.from(await publicBytes.arrayBuffer()), png);
+    const publicRange = await fetch(base + `/posts/media/${publicAudio.id}`, {
+      headers: { Range: 'bytes=0-9' },
+    });
+    assert.equal(publicRange.status, 206);
+    assert.deepEqual(Buffer.from(await publicRange.arrayBuffer()), wav.subarray(0, 10));
+    assert.equal(
+      (await request(`/posts/${publicImage.id}`, 'DELETE', undefined, cookie2)).status,
+      403,
+    );
+    await stop();
+    await start();
+    feed = await (await request('/posts')).json();
+    assert.equal(feed.find((row) => row.id === post.id).content, 'Mi primera idea');
+    assert.equal((await request('/auth/me', 'GET', undefined, cookie)).status, 200);
+    const persistedPublic = await request(`/posts/media/${publicImage.id}`);
+    assert.deepEqual(Buffer.from(await persistedPublic.arrayBuffer()), png);
+    for (const mediaPost of [publicImage, publicAudio, publicVideo])
+      assert.equal(
+        (await request(`/posts/${mediaPost.id}`, 'DELETE', undefined, cookie)).status,
+        204,
+      );
+    assert.equal((await request(`/posts/media/${publicImage.id}`)).status, 404);
+    assert.equal(
+      (await (await request(`/chat/${user.id}/messages`, 'GET', undefined, cookie2)).json()).length,
+      4,
+    );
+    const persistedMedia = await fetch(base + `/chat/media/${imageMessage.id}`, {
+      headers: { Cookie: cookie2 },
+    });
+    assert.deepEqual(Buffer.from(await persistedMedia.arrayBuffer()), png);
+    assert.equal((await request(`/posts/${post.id}`, 'DELETE', undefined, cookie)).status, 204);
+    assert.equal((await request(`/posts/${post.id}/comments`)).status, 404);
+    await request('/auth/logout', 'POST', undefined, cookie);
+    assert.equal((await request('/auth/me', 'GET', undefined, cookie)).status, 401);
+    for (let n = 0; n < 32; n++)
+      await request('/auth/login', 'POST', { email: account.email, password: 'mala' });
+    assert.equal(
+      (await request('/auth/login', 'POST', { email: account.email, password: 'mala' })).status,
+      429,
+    );
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

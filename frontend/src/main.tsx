@@ -1,34 +1,666 @@
-import React,{useState,useEffect,useCallback} from 'react';
-import {createRoot} from 'react-dom/client';
-import {api,BASE,User,Post,Comment} from './api';
+import React, { useState, useEffect, useCallback } from 'react';
+import { createRoot } from 'react-dom/client';
+import { api, BASE, User, Post, Comment } from './api';
 import './style.css';
-import Chat,{MessageComposer,Attachment} from './Chat';
+import Chat, { MessageComposer, Attachment } from './Chat';
 import './theme.css';
-function initials(name:string){return name.split(' ').slice(0,2).map(v=>v[0]).join('').toUpperCase();}
-function Avatar({user,small=false}:{user:{name:string};small?:boolean}){return <span className={`avatar ${small?'small':''}`} aria-hidden="true">{initials(user.name)}</span>;}
-function Auth({onSuccess,onClose}:{onSuccess:(u:User)=>void;onClose:()=>void}){
- const [register,setRegister]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
- async function submit(e:React.FormEvent<HTMLFormElement>){e.preventDefault();setError('');setBusy(true);const data=Object.fromEntries(new FormData(e.currentTarget));try{onSuccess(await api(register?'/auth/register':'/auth/login','POST',data));}catch(err){setError((err as Error).message);}finally{setBusy(false);}}
- return <div className="overlay"><section className="modal" role="dialog" aria-modal="true" aria-label={register?'Crear cuenta':'Iniciar sesión'}><button className="close" onClick={onClose} aria-label="Cerrar">×</button><div className="brand">c<span>✳</span></div><h2>{register?'Tu comunidad empieza aquí.':'Qué bueno verte de nuevo.'}</h2><p className="muted">Comparte lo que aprendes. Conecta con tu campus.</p><form onSubmit={submit}>{register&&<><label>Nombre completo<input name="name" required minLength={2} maxLength={80}/></label><label>Nombre de usuario<input name="username" required pattern="[a-zA-Z0-9_]{3,24}" title="Entre 3 y 24 letras, números o guiones bajos" maxLength={24}/></label></>}<label>Correo electrónico<input name="email" type="email" required autoComplete="email"/></label><label>Contraseña<input name="password" type="password" required minLength={register?10:1} maxLength={128} autoComplete={register?'new-password':'current-password'}/></label>{register&&<p className="muted">Usa al menos 10 caracteres.</p>}{error&&<p role="alert" className="error">{error}</p>}<button className="primary wide" disabled={busy}>{busy?'Un momento…':register?'Crear mi cuenta':'Entrar a Campus'}</button></form><button className="text-btn wide" onClick={()=>{setRegister(!register);setError('');}}>{register?'Ya tengo una cuenta':'¿Primera vez? Crea tu cuenta'}</button></section></div>;
+function initials(name: string) {
+  return name
+    .split(' ')
+    .slice(0, 2)
+    .map((v) => v[0])
+    .join('')
+    .toUpperCase();
 }
-function PostCard({post,me,refresh,openProfile,askLogin}:{post:Post;me:User|null;refresh:()=>void;openProfile:(id:number)=>void;askLogin:()=>void}){
- const [expanded,setExpanded]=useState(false),[comments,setComments]=useState<Comment[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false);
- const loadComments=useCallback(()=>api<Comment[]>(`/posts/${post.id}/comments`).then(setComments).catch(err=>setError(err.message)),[post.id]);
- useEffect(()=>{if(expanded)void loadComments();},[expanded,post.comments,loadComments]);
- async function action(fn:()=>Promise<any>){if(!me){askLogin();return;}setBusy(true);setError('');try{await fn();refresh();}catch(err){setError((err as Error).message);}finally{setBusy(false);}}
- async function comment(e:React.FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget;const content=new FormData(form).get('content');await action(async()=>{await api(`/posts/${post.id}/comments`,'POST',{content});form.reset();await loadComments();});}
- return <article className="post"><header><button className="person" onClick={()=>openProfile(post.user_id)}><Avatar user={post}/><span><strong>{post.name}</strong><small>@{post.username} · {new Date(post.created_at.replace(' ','T')+'Z').toLocaleDateString('es-GT',{day:'numeric',month:'short'})}</small></span></button>{me?.id===post.user_id&&<button className="delete" disabled={busy} onClick={()=>{if(confirm('¿Eliminar esta publicación?'))void action(()=>api(`/posts/${post.id}`,'DELETE'));}} aria-label="Eliminar publicación">×</button>}</header><p className="post-content">{post.content}</p>{post.media_url&&post.media_kind&&<div className="post-attachment"><Attachment url={BASE+post.media_url} kind={post.media_kind}/></div>}<footer><button className={post.liked?'liked':''} disabled={busy} aria-pressed={post.liked} onClick={()=>void action(()=>api(`/posts/${post.id}/like`,post.liked?'DELETE':'PUT'))}>{post.liked?'♥':'♡'} <span>{post.likes}</span> <span className="action-label">Me gusta</span></button><button onClick={()=>setExpanded(!expanded)} aria-expanded={expanded}>♧ <span>{post.comments}</span> <span className="action-label">Comentarios</span></button></footer>{error&&<p className="error" role="alert">{error}</p>}{expanded&&<section className="comments">{me?<form onSubmit={comment} className="comment-form"><input name="content" aria-label="Escribe un comentario" placeholder="Suma tu idea…" required maxLength={500}/><button className="primary" disabled={busy}>Enviar</button></form>:<button className="text-btn" onClick={askLogin}>Inicia sesión para comentar</button>}{comments.map(c=><div className="comment" key={c.id}><Avatar user={c} small/><div><strong>{c.name}</strong><p>{c.content}</p></div></div>)}{comments.length===0&&<p className="muted">Todavía no hay comentarios. Abre la conversación.</p>}</section>}</article>;
+function Avatar({ user, small = false }: { user: { name: string }; small?: boolean }) {
+  return (
+    <span className={`avatar ${small ? 'small' : ''}`} aria-hidden="true">
+      {initials(user.name)}
+    </span>
+  );
 }
-function App(){
- const [chatOpen,setChatOpen]=useState(false);
- const [me,setMe]=useState<User|null>(null),[posts,setPosts]=useState<Post[]>([]),[users,setUsers]=useState<User[]>([]),[profile,setProfile]=useState<User|null>(null),[profileId,setProfileId]=useState<number|null>(null),[tab,setTab]=useState('all'),[auth,setAuth]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[busy,setBusy]=useState(false),[live,setLive]=useState(false),[page,setPage]=useState(1),[more,setMore]=useState(false),[editing,setEditing]=useState(false);
- const refresh=useCallback(async()=>{try{const [feed,community]=await Promise.all([api<Post[]>(`/posts?mode=${profileId?'all':tab}${profileId?`&author=${profileId}`:''}&page=${page}`),api<User[]>('/users')]);setPosts(feed);setMore(feed.length===20);setUsers(community);if(profileId)setProfile(await api<User>(`/users/${profileId}`));setError('');}catch(err){setError((err as Error).message);}finally{setLoading(false);}},[tab,profileId,page]);
- useEffect(()=>{void api<User>('/auth/me').then(setMe).catch(()=>{});},[]);
- useEffect(()=>{setLoading(true);void refresh();},[refresh,me]);
- useEffect(()=>{const stream=new EventSource(`${BASE}/api/events`);stream.onopen=()=>{setLive(true);void refresh();};stream.onerror=()=>setLive(false);stream.onmessage=e=>{if(JSON.parse(e.data).type!=='heartbeat')void refresh();};return()=>stream.close();},[refresh]);
- const openProfile=(id:number)=>{setProfileId(id);setProfile(null);setPage(1);setEditing(false);};
- async function mutation(fn:()=>Promise<void>){setBusy(true);setError('');try{await fn();await refresh();}catch(err){setError((err as Error).message);}finally{setBusy(false);}}
- const selectTab=(value:string)=>{if(value==='following'&&!me){setAuth(true);return;}setTab(value);setProfileId(null);setProfile(null);setPage(1);};
- return <><div className="layout"><aside className="sidebar"><a className="wordmark" href="#" onClick={e=>{e.preventDefault();selectTab('all');}}>c<span>✳</span> campus</a><div className="sidebar-label">TU ESPACIO</div><nav aria-label="Navegación principal"><button className={!profileId&&tab==='all'?'active':''} onClick={()=>selectTab('all')}><span>⌂</span> Explorar</button><button className={!profileId&&tab==='following'?'active':''} onClick={()=>selectTab('following')}><span>◎</span> Siguiendo</button><button className={profileId===me?.id?'active':''} onClick={()=>me?openProfile(me.id):setAuth(true)}><span>◉</span> Mi perfil</button><button onClick={()=>me?setChatOpen(true):setAuth(true)}><span>✉</span> Mensajes</button></nav><div className="sidebar-note"><span>✦</span><h3>Las ideas crecen<br/>cuando se comparten.</h3><p>Este es tu lugar para aprender, preguntar y conectar.</p></div><div className="account">{me?<><button className="person" onClick={()=>openProfile(me.id)}><Avatar user={me} small/><span><strong>{me.name}</strong><small>@{me.username}</small></span></button><button className="text-btn" onClick={()=>void mutation(async()=>{await api('/auth/logout','POST');setMe(null);selectTab('all');})}>Cerrar sesión</button></>:<button className="primary wide" onClick={()=>setAuth(true)}>Entrar a Campus ↗</button>}</div></aside><main><header className="topbar"><span>COMUNIDAD ESTUDIANTIL</span><span className={`live ${live?'connected':''}`} role="status">● {live?'En vivo':'Reconectando…'}</span></header><section className="hero"><span className="eyebrow">UN CAMPUS. MUCHAS IDEAS.</span><h1>{profileId?'Conoce a tu comunidad.':'Tu próxima idea empieza aquí.'}</h1><p>Lo que aprendes, lo que creas y lo que quieres compartir.</p><span className="hero-art" aria-hidden="true">✳</span></section>{profileId&&profile&&<section className="profile card"><Avatar user={profile}/><div><h2>{profile.name}</h2><p className="muted">@{profile.username}</p><p>{profile.bio||'Un nuevo integrante de Campus.'}</p><div className="counts"><strong>{profile.followers}</strong> seguidores · <strong>{profile.following}</strong> siguiendo</div></div>{me?.id===profile.id?<button className="outline" onClick={()=>setEditing(!editing)}>Editar perfil</button>:<button className="primary" disabled={busy} onClick={()=>me?void mutation(async()=>{await api(`/users/${profile.id}/follow`,profile.isFollowing?'DELETE':'PUT');}):setAuth(true)}>{profile.isFollowing?'Dejar de seguir':'Seguir +'}</button>}{editing&&<form className="edit-profile" onSubmit={e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.currentTarget));void mutation(async()=>{const updated=await api<User>('/users/me','PATCH',data);setMe(updated);setEditing(false);});}}><label>Nombre<input name="name" defaultValue={profile.name} required minLength={2} maxLength={80}/></label><label>Biografía<textarea name="bio" defaultValue={profile.bio} maxLength={160}/></label><button className="primary" disabled={busy}>Guardar cambios</button></form>}</section>}{!profileId&&<section className="composer card">{me?<MessageComposer peer={me} publish onSent={()=>{setPage(1);void refresh();}}/>:<div className="welcome"><div><h3>Tu voz también cuenta.</h3><p>Únete para publicar y conectar con otros estudiantes.</p></div><button className="primary" onClick={()=>setAuth(true)}>Unirme ↗</button></div>}</section>}<div className="feed-heading"><h2>{profileId?'Publicaciones':tab==='following'?'Tu comunidad':'En el campus'}</h2>{!profileId&&<div className="tabs"><button className={tab==='all'?'selected':''} onClick={()=>selectTab('all')}>Todo</button><button className={tab==='following'?'selected':''} onClick={()=>selectTab('following')}>Siguiendo</button></div>}</div>{error&&<div className="error card" role="alert">{error}<button className="text-btn" onClick={()=>void refresh()}>Reintentar</button></div>}{loading?<div className="empty card" role="status">Cargando publicaciones…</div>:posts.length===0?<div className="empty card"><span>✧</span><h3>{tab==='following'&&!profileId?'Aquí aparecerán las personas que sigues.':'Una comunidad empieza con una idea.'}</h3><p>{tab==='following'&&!profileId?'Sigue a alguien desde su perfil para ver sus publicaciones.':'Sé la primera persona en compartir algo.'}</p></div>:posts.map(post=><PostCard key={post.id} post={post} me={me} refresh={()=>void refresh()} openProfile={openProfile} askLogin={()=>setAuth(true)}/>)}<div className="pagination">{page>1&&<button className="outline" onClick={()=>setPage(page-1)}>← Anteriores</button>}{more&&<button className="outline" onClick={()=>setPage(page+1)}>Siguientes →</button>}</div><footer className="main-footer">Hecho para conectar. Construido para aprender.</footer></main><aside className="rightbar"><div className="right-intro"><span className="eyebrow">EL CONOCIMIENTO SE COMPARTE</span><h3>Personas que hacen<br/>comunidad.</h3></div><section className="community card"><h3>Conecta con tu campus <span>↗</span></h3>{users.filter(u=>u.id!==me?.id).slice(0,6).map(u=><button className="person" key={u.id} onClick={()=>openProfile(u.id)}><Avatar user={u} small/><span><strong>{u.name}</strong><small>@{u.username}</small></span><span className="arrow">→</span></button>)}{users.filter(u=>u.id!==me?.id).length===0&&<p className="muted">Invita a un compañero y empieza a conectar.</p>}</section><section className="guidelines"><span>✳</span><h3>Un buen lugar<br/>lo hacemos todos.</h3><p>Comparte con respeto. Da crédito a las ideas. Haz preguntas. Ayuda a alguien a aprender.</p></section><a className="docs-link" href={`${BASE}/api/docs`} target="_blank" rel="noreferrer">Documentación del API ↗</a><p className="copyright">Campus © 2026<br/>Proyecto de Desarrollo Web</p></aside></div>{chatOpen&&me&&<Chat me={me} users={users} onClose={()=>setChatOpen(false)}/>} {auth&&<Auth onClose={()=>setAuth(false)} onSuccess={u=>{setMe(u);setAuth(false);setError('');}}/>}</>;
+function Auth({ onSuccess, onClose }: { onSuccess: (u: User) => void; onClose: () => void }) {
+  const [register, setRegister] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    const data = Object.fromEntries(new FormData(e.currentTarget));
+    try {
+      onSuccess(await api(register ? '/auth/register' : '/auth/login', 'POST', data));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="overlay">
+      <section
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={register ? 'Crear cuenta' : 'Iniciar sesión'}
+      >
+        <button className="close" onClick={onClose} aria-label="Cerrar">
+          ×
+        </button>
+        <div className="brand">
+          c<span>✳</span>
+        </div>
+        <h2>{register ? 'Tu comunidad empieza aquí.' : 'Qué bueno verte de nuevo.'}</h2>
+        <p className="muted">Comparte lo que aprendes. Conecta con tu campus.</p>
+        <form onSubmit={submit}>
+          {register && (
+            <>
+              <label>
+                Nombre completo
+                <input name="name" required minLength={2} maxLength={80} />
+              </label>
+              <label>
+                Nombre de usuario
+                <input
+                  name="username"
+                  required
+                  pattern="[a-zA-Z0-9_]{3,24}"
+                  title="Entre 3 y 24 letras, números o guiones bajos"
+                  maxLength={24}
+                />
+              </label>
+            </>
+          )}
+          <label>
+            Correo electrónico
+            <input name="email" type="email" required autoComplete="email" />
+          </label>
+          <label>
+            Contraseña
+            <input
+              name="password"
+              type="password"
+              required
+              minLength={register ? 10 : 1}
+              maxLength={128}
+              autoComplete={register ? 'new-password' : 'current-password'}
+            />
+          </label>
+          {register && <p className="muted">Usa al menos 10 caracteres.</p>}
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <button className="primary wide" disabled={busy}>
+            {busy ? 'Un momento…' : register ? 'Crear mi cuenta' : 'Entrar a Campus'}
+          </button>
+        </form>
+        <button
+          className="text-btn wide"
+          onClick={() => {
+            setRegister(!register);
+            setError('');
+          }}
+        >
+          {register ? 'Ya tengo una cuenta' : '¿Primera vez? Crea tu cuenta'}
+        </button>
+      </section>
+    </div>
+  );
 }
-createRoot(document.getElementById('root')!).render(<App/>);
+function PostCard({
+  post,
+  me,
+  refresh,
+  openProfile,
+  askLogin,
+}: {
+  post: Post;
+  me: User | null;
+  refresh: () => void;
+  openProfile: (id: number) => void;
+  askLogin: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false),
+    [comments, setComments] = useState<Comment[]>([]),
+    [error, setError] = useState(''),
+    [busy, setBusy] = useState(false);
+  const loadComments = useCallback(
+    () =>
+      api<Comment[]>(`/posts/${post.id}/comments`)
+        .then(setComments)
+        .catch((err) => setError(err.message)),
+    [post.id],
+  );
+  useEffect(() => {
+    if (expanded) void loadComments();
+  }, [expanded, post.comments, loadComments]);
+  async function action(fn: () => Promise<any>) {
+    if (!me) {
+      askLogin();
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+      refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function comment(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const content = new FormData(form).get('content');
+    await action(async () => {
+      await api(`/posts/${post.id}/comments`, 'POST', { content });
+      form.reset();
+      await loadComments();
+    });
+  }
+  return (
+    <article className="post">
+      <header>
+        <button className="person" onClick={() => openProfile(post.user_id)}>
+          <Avatar user={post} />
+          <span>
+            <strong>{post.name}</strong>
+            <small>
+              @{post.username} ·{' '}
+              {new Date(post.created_at.replace(' ', 'T') + 'Z').toLocaleDateString('es-GT', {
+                day: 'numeric',
+                month: 'short',
+              })}
+            </small>
+          </span>
+        </button>
+        {me?.id === post.user_id && (
+          <button
+            className="delete"
+            disabled={busy}
+            onClick={() => {
+              if (confirm('¿Eliminar esta publicación?'))
+                void action(() => api(`/posts/${post.id}`, 'DELETE'));
+            }}
+            aria-label="Eliminar publicación"
+          >
+            ×
+          </button>
+        )}
+      </header>
+      <p className="post-content">{post.content}</p>
+      {post.media_url && post.media_kind && (
+        <div className="post-attachment">
+          <Attachment url={BASE + post.media_url} kind={post.media_kind} />
+        </div>
+      )}
+      <footer>
+        <button
+          className={post.liked ? 'liked' : ''}
+          disabled={busy}
+          aria-pressed={post.liked}
+          onClick={() =>
+            void action(() => api(`/posts/${post.id}/like`, post.liked ? 'DELETE' : 'PUT'))
+          }
+        >
+          {post.liked ? '♥' : '♡'} <span>{post.likes}</span>{' '}
+          <span className="action-label">Me gusta</span>
+        </button>
+        <button onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
+          ♧ <span>{post.comments}</span> <span className="action-label">Comentarios</span>
+        </button>
+      </footer>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {expanded && (
+        <section className="comments">
+          {me ? (
+            <form onSubmit={comment} className="comment-form">
+              <input
+                name="content"
+                aria-label="Escribe un comentario"
+                placeholder="Suma tu idea…"
+                required
+                maxLength={500}
+              />
+              <button className="primary" disabled={busy}>
+                Enviar
+              </button>
+            </form>
+          ) : (
+            <button className="text-btn" onClick={askLogin}>
+              Inicia sesión para comentar
+            </button>
+          )}
+          {comments.map((c) => (
+            <div className="comment" key={c.id}>
+              <Avatar user={c} small />
+              <div>
+                <strong>{c.name}</strong>
+                <p>{c.content}</p>
+              </div>
+            </div>
+          ))}
+          {comments.length === 0 && (
+            <p className="muted">Todavía no hay comentarios. Abre la conversación.</p>
+          )}
+        </section>
+      )}
+    </article>
+  );
+}
+function App() {
+  const [chatOpen, setChatOpen] = useState(false);
+  const [me, setMe] = useState<User | null>(null),
+    [posts, setPosts] = useState<Post[]>([]),
+    [users, setUsers] = useState<User[]>([]),
+    [profile, setProfile] = useState<User | null>(null),
+    [profileId, setProfileId] = useState<number | null>(null),
+    [tab, setTab] = useState('all'),
+    [auth, setAuth] = useState(false),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(''),
+    [busy, setBusy] = useState(false),
+    [live, setLive] = useState(false),
+    [page, setPage] = useState(1),
+    [more, setMore] = useState(false),
+    [editing, setEditing] = useState(false);
+  const refresh = useCallback(async () => {
+    try {
+      const [feed, community] = await Promise.all([
+        api<Post[]>(
+          `/posts?mode=${profileId ? 'all' : tab}${profileId ? `&author=${profileId}` : ''}&page=${page}`,
+        ),
+        api<User[]>('/users'),
+      ]);
+      setPosts(feed);
+      setMore(feed.length === 20);
+      setUsers(community);
+      if (profileId) setProfile(await api<User>(`/users/${profileId}`));
+      setError('');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [tab, profileId, page]);
+  useEffect(() => {
+    void api<User>('/auth/me')
+      .then(setMe)
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    setLoading(true);
+    void refresh();
+  }, [refresh, me]);
+  useEffect(() => {
+    const stream = new EventSource(`${BASE}/api/events`);
+    stream.onopen = () => {
+      setLive(true);
+      void refresh();
+    };
+    stream.onerror = () => setLive(false);
+    stream.onmessage = (e) => {
+      if (JSON.parse(e.data).type !== 'heartbeat') void refresh();
+    };
+    return () => stream.close();
+  }, [refresh]);
+  const openProfile = (id: number) => {
+    setProfileId(id);
+    setProfile(null);
+    setPage(1);
+    setEditing(false);
+  };
+  async function mutation(fn: () => Promise<void>) {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const selectTab = (value: string) => {
+    if (value === 'following' && !me) {
+      setAuth(true);
+      return;
+    }
+    setTab(value);
+    setProfileId(null);
+    setProfile(null);
+    setPage(1);
+  };
+  return (
+    <>
+      <div className="layout">
+        <aside className="sidebar">
+          <a
+            className="wordmark"
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              selectTab('all');
+            }}
+          >
+            c<span>✳</span> campus
+          </a>
+          <div className="sidebar-label">TU ESPACIO</div>
+          <nav aria-label="Navegación principal">
+            <button
+              className={!profileId && tab === 'all' ? 'active' : ''}
+              onClick={() => selectTab('all')}
+            >
+              <span>⌂</span> Explorar
+            </button>
+            <button
+              className={!profileId && tab === 'following' ? 'active' : ''}
+              onClick={() => selectTab('following')}
+            >
+              <span>◎</span> Siguiendo
+            </button>
+            <button
+              className={profileId === me?.id ? 'active' : ''}
+              onClick={() => (me ? openProfile(me.id) : setAuth(true))}
+            >
+              <span>◉</span> Mi perfil
+            </button>
+            <button onClick={() => (me ? setChatOpen(true) : setAuth(true))}>
+              <span>✉</span> Mensajes
+            </button>
+          </nav>
+          <div className="sidebar-note">
+            <span>✦</span>
+            <h3>
+              Las ideas crecen
+              <br />
+              cuando se comparten.
+            </h3>
+            <p>Este es tu lugar para aprender, preguntar y conectar.</p>
+          </div>
+          <div className="account">
+            {me ? (
+              <>
+                <button className="person" onClick={() => openProfile(me.id)}>
+                  <Avatar user={me} small />
+                  <span>
+                    <strong>{me.name}</strong>
+                    <small>@{me.username}</small>
+                  </span>
+                </button>
+                <button
+                  className="text-btn"
+                  onClick={() =>
+                    void mutation(async () => {
+                      await api('/auth/logout', 'POST');
+                      setMe(null);
+                      selectTab('all');
+                    })
+                  }
+                >
+                  Cerrar sesión
+                </button>
+              </>
+            ) : (
+              <button className="primary wide" onClick={() => setAuth(true)}>
+                Entrar a Campus ↗
+              </button>
+            )}
+          </div>
+        </aside>
+        <main>
+          <header className="topbar">
+            <span>COMUNIDAD ESTUDIANTIL</span>
+            <span className={`live ${live ? 'connected' : ''}`} role="status">
+              ● {live ? 'En vivo' : 'Reconectando…'}
+            </span>
+          </header>
+          <section className="hero">
+            <span className="eyebrow">UN CAMPUS. MUCHAS IDEAS.</span>
+            <h1>{profileId ? 'Conoce a tu comunidad.' : 'Tu próxima idea empieza aquí.'}</h1>
+            <p>Lo que aprendes, lo que creas y lo que quieres compartir.</p>
+            <span className="hero-art" aria-hidden="true">
+              ✳
+            </span>
+          </section>
+          {profileId && profile && (
+            <section className="profile card">
+              <Avatar user={profile} />
+              <div>
+                <h2>{profile.name}</h2>
+                <p className="muted">@{profile.username}</p>
+                <p>{profile.bio || 'Un nuevo integrante de Campus.'}</p>
+                <div className="counts">
+                  <strong>{profile.followers}</strong> seguidores ·{' '}
+                  <strong>{profile.following}</strong> siguiendo
+                </div>
+              </div>
+              {me?.id === profile.id ? (
+                <button className="outline" onClick={() => setEditing(!editing)}>
+                  Editar perfil
+                </button>
+              ) : (
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() =>
+                    me
+                      ? void mutation(async () => {
+                          await api(
+                            `/users/${profile.id}/follow`,
+                            profile.isFollowing ? 'DELETE' : 'PUT',
+                          );
+                        })
+                      : setAuth(true)
+                  }
+                >
+                  {profile.isFollowing ? 'Dejar de seguir' : 'Seguir +'}
+                </button>
+              )}
+              {editing && (
+                <form
+                  className="edit-profile"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const data = Object.fromEntries(new FormData(e.currentTarget));
+                    void mutation(async () => {
+                      const updated = await api<User>('/users/me', 'PATCH', data);
+                      setMe(updated);
+                      setEditing(false);
+                    });
+                  }}
+                >
+                  <label>
+                    Nombre
+                    <input
+                      name="name"
+                      defaultValue={profile.name}
+                      required
+                      minLength={2}
+                      maxLength={80}
+                    />
+                  </label>
+                  <label>
+                    Biografía
+                    <textarea name="bio" defaultValue={profile.bio} maxLength={160} />
+                  </label>
+                  <button className="primary" disabled={busy}>
+                    Guardar cambios
+                  </button>
+                </form>
+              )}
+            </section>
+          )}
+          {!profileId && (
+            <section className="composer card">
+              {me ? (
+                <MessageComposer
+                  peer={me}
+                  publish
+                  onSent={() => {
+                    setPage(1);
+                    void refresh();
+                  }}
+                />
+              ) : (
+                <div className="welcome">
+                  <div>
+                    <h3>Tu voz también cuenta.</h3>
+                    <p>Únete para publicar y conectar con otros estudiantes.</p>
+                  </div>
+                  <button className="primary" onClick={() => setAuth(true)}>
+                    Unirme ↗
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+          <div className="feed-heading">
+            <h2>
+              {profileId ? 'Publicaciones' : tab === 'following' ? 'Tu comunidad' : 'En el campus'}
+            </h2>
+            {!profileId && (
+              <div className="tabs">
+                <button
+                  className={tab === 'all' ? 'selected' : ''}
+                  onClick={() => selectTab('all')}
+                >
+                  Todo
+                </button>
+                <button
+                  className={tab === 'following' ? 'selected' : ''}
+                  onClick={() => selectTab('following')}
+                >
+                  Siguiendo
+                </button>
+              </div>
+            )}
+          </div>
+          {error && (
+            <div className="error card" role="alert">
+              {error}
+              <button className="text-btn" onClick={() => void refresh()}>
+                Reintentar
+              </button>
+            </div>
+          )}
+          {loading ? (
+            <div className="empty card" role="status">
+              Cargando publicaciones…
+            </div>
+          ) : posts.length === 0 ? (
+            <div className="empty card">
+              <span>✧</span>
+              <h3>
+                {tab === 'following' && !profileId
+                  ? 'Aquí aparecerán las personas que sigues.'
+                  : 'Una comunidad empieza con una idea.'}
+              </h3>
+              <p>
+                {tab === 'following' && !profileId
+                  ? 'Sigue a alguien desde su perfil para ver sus publicaciones.'
+                  : 'Sé la primera persona en compartir algo.'}
+              </p>
+            </div>
+          ) : (
+            posts.map((post) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                me={me}
+                refresh={() => void refresh()}
+                openProfile={openProfile}
+                askLogin={() => setAuth(true)}
+              />
+            ))
+          )}
+          <div className="pagination">
+            {page > 1 && (
+              <button className="outline" onClick={() => setPage(page - 1)}>
+                ← Anteriores
+              </button>
+            )}
+            {more && (
+              <button className="outline" onClick={() => setPage(page + 1)}>
+                Siguientes →
+              </button>
+            )}
+          </div>
+          <footer className="main-footer">Hecho para conectar. Construido para aprender.</footer>
+        </main>
+        <aside className="rightbar">
+          <div className="right-intro">
+            <span className="eyebrow">EL CONOCIMIENTO SE COMPARTE</span>
+            <h3>
+              Personas que hacen
+              <br />
+              comunidad.
+            </h3>
+          </div>
+          <section className="community card">
+            <h3>
+              Conecta con tu campus <span>↗</span>
+            </h3>
+            {users
+              .filter((u) => u.id !== me?.id)
+              .slice(0, 6)
+              .map((u) => (
+                <button className="person" key={u.id} onClick={() => openProfile(u.id)}>
+                  <Avatar user={u} small />
+                  <span>
+                    <strong>{u.name}</strong>
+                    <small>@{u.username}</small>
+                  </span>
+                  <span className="arrow">→</span>
+                </button>
+              ))}
+            {users.filter((u) => u.id !== me?.id).length === 0 && (
+              <p className="muted">Invita a un compañero y empieza a conectar.</p>
+            )}
+          </section>
+          <section className="guidelines">
+            <span>✳</span>
+            <h3>
+              Un buen lugar
+              <br />
+              lo hacemos todos.
+            </h3>
+            <p>
+              Comparte con respeto. Da crédito a las ideas. Haz preguntas. Ayuda a alguien a
+              aprender.
+            </p>
+          </section>
+          <a className="docs-link" href={`${BASE}/api/docs`} target="_blank" rel="noreferrer">
+            Documentación del API ↗
+          </a>
+          <p className="copyright">
+            Campus © 2026
+            <br />
+            Proyecto de Desarrollo Web
+          </p>
+        </aside>
+      </div>
+      {chatOpen && me && <Chat me={me} users={users} onClose={() => setChatOpen(false)} />}{' '}
+      {auth && (
+        <Auth
+          onClose={() => setAuth(false)}
+          onSuccess={(u) => {
+            setMe(u);
+            setAuth(false);
+            setError('');
+          }}
+        />
+      )}
+    </>
+  );
+}
+createRoot(document.getElementById('root')!).render(<App />);
